@@ -5,21 +5,18 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-RAW_DIR       = BASE_DIR / "dataset" / "raw"
-PROCESSED_DIR = BASE_DIR / "dataset" / "processed"
-
-SPLITS = ("train", "valid", "test")
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
-
-CLASS_NAMES = {
-    0: "crack",
-    1: "porosity",
-    2: "spatter",
-    3: "welding_line",
-}
+from .config import (
+    CLASS_NAMES,
+    PROCESSED_DIR,
+    RAW_DIR,
+    SPLITS,
+)
+from .validate import (
+    find_image_paths,
+    find_label_paths,
+    find_orphan_labels,
+    sanitize_yolo_seg_label,
+)
 
 
 @dataclass
@@ -99,60 +96,6 @@ def prepare_output_dirs(output_dir: Path, clean: bool) -> None:
         (output_dir / split / "labels").mkdir(parents=True, exist_ok=True)
 
 
-def image_paths(images_dir: Path) -> list[Path]:
-    if not images_dir.exists():
-        return []
-    return sorted(
-        path
-        for path in images_dir.iterdir()
-        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-    )
-
-
-def sanitize_yolo_seg_label(label_path: Path) -> tuple[list[str], list[str]]:
-    issues = []
-    valid_lines = []
-    lines = label_path.read_text(encoding="utf-8").splitlines()
-
-    for line_number, line in enumerate(lines, start=1):
-        stripped = line.strip()
-        if not stripped:
-            continue
-
-        parts = stripped.split()
-        if len(parts) < 7:
-            issues.append(f"line {line_number}: segmentation label needs class + at least 3 points")
-            continue
-
-        try:
-            class_id = int(float(parts[0]))
-            coords = [float(value) for value in parts[1:]]
-        except ValueError:
-            issues.append(f"line {line_number}: non-numeric value")
-            continue
-
-        if class_id not in CLASS_NAMES:
-            issues.append(f"line {line_number}: unsupported class id {class_id}")
-            continue
-
-        if len(coords) % 2 != 0:
-            issues.append(f"line {line_number}: odd number of polygon coordinates")
-            continue
-
-        if len(coords) < 6:
-            issues.append(f"line {line_number}: polygon has fewer than 3 points")
-            continue
-
-        out_of_range = [value for value in coords if value < 0.0 or value > 1.0]
-        if out_of_range:
-            issues.append(f"line {line_number}: coordinates outside [0, 1]")
-            continue
-
-        valid_lines.append(stripped)
-
-    return valid_lines, issues
-
-
 def copy_pair(
     image_path: Path,
     label_path: Path,
@@ -188,30 +131,27 @@ def count_orphan_labels(dataset_dir: Path, split: str, stats: MergeStats) -> Non
     if not labels_dir.exists():
         return
 
-    image_stems = {path.stem for path in image_paths(images_dir)}
-    for label_path in sorted(labels_dir.glob("*.txt")):
-        if label_path.stem not in image_stems:
-            stats.splits[split].orphan_labels += 1
-            stats.warnings.append(f"Label has no matching image: {label_path}")
+    images = find_image_paths(images_dir, missing_ok=True)
+    labels = find_label_paths(labels_dir, missing_ok=True)
+    for label_path in find_orphan_labels(images, labels):
+        stats.splits[split].orphan_labels += 1
+        stats.warnings.append(f"Label has no matching image: {label_path}")
 
 
 def write_data_yaml(output_dir: Path) -> None:
-    yaml_text = "\n".join(
-        [
-            "path: .",
-            "train: train/images",
-            "val: valid/images",
-            "test: test/images",
-            "",
-            "nc: 4",
-            "names:",
-            "  0: crack",
-            "  1: porosity",
-            "  2: spatter",
-            "  3: welding_line",
-            "",
-        ]
-    )
+    lines = [
+        "path: .",
+        "train: train/images",
+        "val: valid/images",
+        "test: test/images",
+        "",
+        f"nc: {len(CLASS_NAMES)}",
+        "names:",
+    ]
+    lines.extend(f"  {class_id}: {class_name}" for class_id, class_name in CLASS_NAMES.items())
+    lines.append("")
+
+    yaml_text = "\n".join(lines)
     (output_dir / "data.yaml").write_text(yaml_text, encoding="utf-8")
 
 
@@ -229,7 +169,7 @@ def merge_datasets(raw_dir: Path, output_dir: Path, clean: bool = False) -> Merg
             images_dir = dataset_dir / split / "images"
             labels_dir = dataset_dir / split / "labels"
 
-            paths = image_paths(images_dir)
+            paths = find_image_paths(images_dir, missing_ok=True)
             if not paths:
                 continue
 
