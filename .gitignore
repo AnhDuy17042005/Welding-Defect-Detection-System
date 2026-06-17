@@ -1,1 +1,9 @@
-dataset/
+# Ignore dataset contents
+dataset/processed/*
+dataset/raw/*
+dataset/classifier/*
+
+# Keep empty folder structure
+!dataset/processed/.gitkeep
+!dataset/raw/.gitkeep
+!dataset/classifier/.gitkeep
