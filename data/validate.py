@@ -3,8 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import CLASS_NAMES, IMAGE_EXTS
-
+from config import CLASS_NAMES, IMAGE_EXTS
 
 @dataclass(frozen=True)
 class YoloSegAnnotation:

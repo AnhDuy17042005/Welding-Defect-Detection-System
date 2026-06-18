@@ -5,13 +5,13 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import (
+from config import (
     CLASS_NAMES,
     PROCESSED_DIR,
     RAW_DIR,
     SPLITS,
 )
-from .validate import (
+from validate import (
     find_image_paths,
     find_label_paths,
     find_orphan_labels,

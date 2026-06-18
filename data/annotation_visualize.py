@@ -15,15 +15,15 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from .annotation_qc import AnnotationQC
-from .config import (
+from annotation_qc import AnnotationQC
+from config import (
     CLASS_COLORS,
     CLASS_NAMES,
     DEFAULT_IMAGES_DIR,
     DEFAULT_LABELS_DIR,
     DEFAULT_VISUALIZE_DIR,
 )
-from .validate import read_yolo_seg_label
+from validate import read_yolo_seg_label
 
 
 class AnnotationVisualizer:

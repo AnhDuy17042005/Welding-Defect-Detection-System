@@ -4,8 +4,8 @@ import argparse
 from collections import Counter
 from pathlib import Path
 
-from .config import CLASS_NAMES, DEFAULT_IMAGES_DIR, DEFAULT_LABELS_DIR
-from .validate import (
+from config import CLASS_NAMES, DEFAULT_IMAGES_DIR, DEFAULT_LABELS_DIR
+from validate import (
     find_image_paths,
     find_label_paths,
     find_missing_label_images,
