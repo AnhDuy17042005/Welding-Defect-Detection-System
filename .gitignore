@@ -1,9 +1,17 @@
 # Ignore dataset contents
-dataset/processed/*
-dataset/raw/*
-dataset/classifier/*
+dataset/archive/
+dataset/processed/
+dataset/raw/
+dataset/require/
 
 # Keep empty folder structure
 !dataset/processed/.gitkeep
 !dataset/raw/.gitkeep
-!dataset/classifier/.gitkeep
+!dataset/require/.gitkeep
+!dataset/archive/.gitkeep
+
+.venv/
+.vscode/
+
+__pycache__/
+*.py[cod]

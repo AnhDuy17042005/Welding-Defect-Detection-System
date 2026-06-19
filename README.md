@@ -31,6 +31,27 @@ The system is designed to be expandable to the full 13 customer-required welding
 * Python
 * YOLO11-seg
 * OpenCV
+* FastAPI
+* Docker
+
+## Web Inference App
+
+Run the local API and upload UI:
+
+```bash
+.venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Open `http://127.0.0.1:8000`.
+
+Docker:
+
+```bash
+docker compose up --build
+```
+
+The default model path is `models/runs/train_ver2/weights/best.pt`. Override it with `MODEL_PATH` when deploying another YOLO segmentation model.
 
 ## Status
 
