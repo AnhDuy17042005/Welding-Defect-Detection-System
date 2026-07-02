@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Welding Defect Inspection System</title>
-    <link rel="stylesheet" href="/static/styles.css?v=5">
+    <link rel="stylesheet" href="/static/styles.css?v=8">
   </head>
   <body>
     <main class="app-shell">
@@ -35,6 +35,41 @@
             </div>
 
             <div class="settings-grid">
+              <div class="model-config-row">
+                <label>
+                  <span>YOLO Model</span>
+                  <select id="yoloModelInput" name="yolo_model">
+                    <option value="">Loading models...</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Image Size</span>
+                  <select id="yoloImgszInput" name="imgsz">
+                    <option value="640">640</option>
+                    <option value="960" selected>960</option>
+                    <option value="1280">1280</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="model-config-row">
+                <label>
+                  <span>U-Net Model</span>
+                  <select id="unetModelInput" name="unet_model">
+                    <option value="">Loading models...</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Image Size</span>
+                  <select id="unetImgszInput" name="unet_imgsz">
+                    <option value="256">256</option>
+                    <option value="512" selected>512</option>
+                  </select>
+                </label>
+              </div>
+
               <label>
                 <span>Confidence Threshold</span>
                 <output id="confValue">0.25</output>
@@ -48,13 +83,42 @@
               </label>
 
               <label>
-                <span>Image Size</span>
-                <select id="imgszInput" name="imgsz">
-                  <option value="640">640</option>
-                  <option value="960"selected>960</option>
-                  <option value="1280">1280</option>
-                </select>
+                <span>U-Net Threshold</span>
+                <output id="unetThresholdValue">0.25</output>
+                <input id="unetThresholdInput" name="unet_threshold" type="range" min="0.05" max="0.9" step="0.05" value="0.3">
               </label>
+
+              <label>
+                <span>ROI Margin</span>
+                <output id="roiMarginValue">0.5</output>
+                <input id="roiMarginInput" name="roi_margin" type="range" min="0.05" max="0.90" step="0.05" value="0.15">
+              </label>
+
+              <fieldset class="display-settings">
+                <legend>Display</legend>
+
+                <div class="display-options">
+                  <label class="display-option">
+                    <input id="showMasksInput" name="show_masks" type="checkbox">
+                    <span>Masks</span>
+                  </label>
+
+                  <label class="display-option">
+                    <input id="showBoxesInput" name="show_boxes" type="checkbox" checked>
+                    <span>Boxes</span>
+                  </label>
+
+                  <label class="display-option">
+                    <input id="showLabelsInput" name="show_labels" type="checkbox">
+                    <span>Labels</span>
+                  </label>
+
+                  <label class="display-option">
+                    <input id="showConfInput" name="show_conf" type="checkbox">
+                    <span>Confidence</span>
+                  </label>
+                </div>
+              </fieldset>
             </div>
 
             <div class="actions">
@@ -76,7 +140,18 @@
               <h2 id="verdictTitle">No Image Selected</h2>
             </div>
 
-            <div class="score-chip" id="scoreChip">--</div>
+            <div class="result-header-actions">
+              <div class="score-chip" id="scoreChip">--</div>
+
+              <button
+                class="ghost-button"
+                id="downloadButton"
+                type="button"
+                disabled
+              >
+                Save Result
+              </button>
+            </div>
           </div>
 
           <div class="metrics">
@@ -102,7 +177,11 @@
             </button>
 
             <button class="tab-button" type="button" data-tab="mask">
-              Mask
+              Mask YOLO
+            </button>
+
+            <button class="tab-button" type="button" data-tab="unet-mask">
+              Mask U-Net
             </button>
           </div>
 
@@ -110,6 +189,12 @@
             <img id="overlayImage" class="result-image active" alt="Segmentation Overlay">
 
             <img id="maskImage" class="result-image" alt="Segmentation Mask">
+
+            <img
+              id="unetMaskImage"
+              class="result-image"
+              alt="U-Net Ripple Mask"
+            >
 
             <div class="empty-result" id="emptyResult">
               Segmentation Output
@@ -138,6 +223,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=4"></script>
+    <script src="/static/app.js?v=9"></script>
   </body>
 </html>

@@ -1,33 +1,47 @@
-const form = document.querySelector("#uploadForm");
-const imageInput = document.querySelector("#imageInput");
-const dropZone = document.querySelector("#dropZone");
-const fileName = document.querySelector("#fileName");
-const previewImage = document.querySelector("#previewImage");
-const emptyPreview = document.querySelector("#emptyPreview");
-const submitButton = document.querySelector("#submitButton");
-const resetButton = document.querySelector("#resetButton");
-const confInput = document.querySelector("#confInput");
-const iouInput = document.querySelector("#iouInput");
-const confValue = document.querySelector("#confValue");
-const iouValue = document.querySelector("#iouValue");
-const healthStatus = document.querySelector("#healthStatus");
-const verdictTitle = document.querySelector("#verdictTitle");
-const scoreChip = document.querySelector("#scoreChip");
-const primaryClass = document.querySelector("#primaryClass");
-const defectCount = document.querySelector("#defectCount");
-const inferenceTime = document.querySelector("#inferenceTime");
-const overlayImage = document.querySelector("#overlayImage");
-const maskImage = document.querySelector("#maskImage");
-const emptyResult = document.querySelector("#emptyResult");
-const predictionRows = document.querySelector("#predictionRows");
-const tabButtons = document.querySelectorAll(".tab-button");
-const previewFrame = document.querySelector(".preview-frame");
-const imageStage = document.querySelector(".image-stage");
+const form            = document.querySelector("#uploadForm");
+const imageInput      = document.querySelector("#imageInput");
+const dropZone        = document.querySelector("#dropZone");
+const fileName        = document.querySelector("#fileName");
+const previewImage    = document.querySelector("#previewImage");
+const emptyPreview    = document.querySelector("#emptyPreview");
+const submitButton    = document.querySelector("#submitButton");
+const resetButton     = document.querySelector("#resetButton");
+const confInput       = document.querySelector("#confInput");
+const iouInput        = document.querySelector("#iouInput");
+const unetThresholdInput = document.querySelector("#unetThresholdInput");
+const roiMarginInput  = document.querySelector("#roiMarginInput");
+const confValue       = document.querySelector("#confValue");
+const iouValue        = document.querySelector("#iouValue");
+const unetThresholdValue = document.querySelector("#unetThresholdValue");
+const roiMarginValue  = document.querySelector("#roiMarginValue");
+const yoloModelInput  = document.querySelector("#yoloModelInput");
+const unetModelInput  = document.querySelector("#unetModelInput");
+const unetImgszInput  = document.querySelector("#unetImgszInput");
+const showMasksInput  = document.querySelector("#showMasksInput");
+const showBoxesInput  = document.querySelector("#showBoxesInput");
+const showLabelsInput = document.querySelector("#showLabelsInput");
+const showConfInput   = document.querySelector("#showConfInput");
+const healthStatus    = document.querySelector("#healthStatus");
+const verdictTitle    = document.querySelector("#verdictTitle");
+const scoreChip       = document.querySelector("#scoreChip");
+const primaryClass    = document.querySelector("#primaryClass");
+const defectCount     = document.querySelector("#defectCount");
+const inferenceTime   = document.querySelector("#inferenceTime");
+const overlayImage    = document.querySelector("#overlayImage");
+const maskImage       = document.querySelector("#maskImage");
+const emptyResult     = document.querySelector("#emptyResult");
+const predictionRows  = document.querySelector("#predictionRows");
+const tabButtons      = document.querySelectorAll(".tab-button");
+const previewFrame    = document.querySelector(".preview-frame");
+const imageStage      = document.querySelector(".image-stage");
+const downloadButton  = document.querySelector("#downloadButton");
+const unetMaskImage   = document.querySelector("#unetMaskImage");
 
 let selectedFile = null;
 let previewUrl = null;
 let previewViewer = null;
 let resultViewer = null;
+let modelChangeTimer = null;
 
 function setHealth(state, text) {
   healthStatus.classList.remove("ok", "error");
@@ -44,16 +58,46 @@ async function loadHealth() {
       throw new Error("Model unavailable");
     }
     const data = await response.json();
-    const classCount = Object.keys(data.classes || {}).length;
-    setHealth("ok", `Model is ready`);
+    const models = data.models || {};
+    populateModelSelect(yoloModelInput, models.yolo || [], models.selected_yolo);
+    populateModelSelect(unetModelInput, models.unet || [], models.selected_unet);
+    if (Number.isFinite(Number(data.unet_threshold))) {
+      unetThresholdInput.value = data.unet_threshold;
+      unetThresholdInput.defaultValue = data.unet_threshold;
+    }
+    if (Number.isFinite(Number(data.roi_margin))) {
+      roiMarginInput.value = data.roi_margin;
+      roiMarginInput.defaultValue = data.roi_margin;
+    }
+    if (Number.isFinite(Number(data.unet_imgsz))) {
+      unetImgszInput.value = data.unet_imgsz;
+      unetImgszInput.defaultValue = data.unet_imgsz;
+    }
+    updateRangeLabels();
+    setHealth("ok", data.model_name || "YOLOv11 + U-Net");
   } catch (error) {
     setHealth("error", "Model is not ready");
   }
 }
 
+function populateModelSelect(select, models, selectedId) {
+  select.replaceChildren();
+
+  models.forEach((model) => {
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = model.label;
+    option.selected = model.id === selectedId;
+    option.defaultSelected = model.id === selectedId;
+    select.append(option);
+  });
+}
+
 function updateRangeLabels() {
   confValue.value = Number(confInput.value).toFixed(2);
   iouValue.value = Number(iouInput.value).toFixed(2);
+  unetThresholdValue.value = Number(unetThresholdInput.value).toFixed(2);
+  roiMarginValue.value = Number(roiMarginInput.value).toFixed(2);
 }
 
 function createImageViewer(frame, images) {
@@ -231,6 +275,9 @@ function resetResult() {
   overlayImage.classList.remove("active");
   maskImage.classList.remove("active");
   emptyResult.hidden = false;
+  downloadButton.disabled = true;
+  unetMaskImage.removeAttribute("src");
+  unetMaskImage.classList.remove("active");
   predictionRows.innerHTML = '<tr><td colspan="4">--</td></tr>';
   setActiveTab("overlay");
   resultViewer.reset();
@@ -238,6 +285,8 @@ function resetResult() {
 
 function setLoading(isLoading) {
   submitButton.disabled = isLoading || !selectedFile;
+  yoloModelInput.disabled = isLoading;
+  unetModelInput.disabled = isLoading;
   submitButton.textContent = isLoading ? "Analyzing" : "Inspect";
 }
 
@@ -265,12 +314,19 @@ function renderResult(data) {
 
   overlayImage.src = data.annotated_image;
   overlayImage.classList.add("active");
+  downloadButton.disabled = !data.annotated_image;
   emptyResult.hidden = true;
 
   if (data.mask_image) {
     maskImage.src = data.mask_image;
   } else {
     maskImage.removeAttribute("src");
+  }
+
+  if (data.unet_mask_image) {
+    unetMaskImage.src = data.unet_mask_image;
+  } else {
+    unetMaskImage.removeAttribute("src");
   }
 
   renderRows(data.predictions || []);
@@ -312,12 +368,27 @@ function setActiveTab(tabName) {
     button.classList.toggle("active", button.dataset.tab === tabName);
   });
 
-  overlayImage.classList.toggle("active", tabName === "overlay" && Boolean(overlayImage.src));
-  maskImage.classList.toggle("active", tabName === "mask" && Boolean(maskImage.src));
+  overlayImage.classList.toggle(
+    "active",
+    tabName === "overlay" && Boolean(overlayImage.src)
+  );
+
+  maskImage.classList.toggle(
+    "active",
+    tabName === "mask" && Boolean(maskImage.src)
+  );
+
+  unetMaskImage.classList.toggle(
+    "active",
+    tabName === "unet-mask" && Boolean(unetMaskImage.src)
+  );
+
   emptyResult.hidden = Boolean(
     (tabName === "overlay" && overlayImage.src) ||
-    (tabName === "mask" && maskImage.src)
+    (tabName === "mask" && maskImage.src) ||
+    (tabName === "unet-mask" && unetMaskImage.src)
   );
+
   resultViewer.refresh();
 }
 
@@ -329,6 +400,12 @@ async function submitImage(event) {
 
   const formData = new FormData(form);
   formData.set("file", selectedFile);
+  formData.set("yolo_model", yoloModelInput.value);
+  formData.set("unet_model", unetModelInput.value);
+  formData.set("show_masks", showMasksInput.checked);
+  formData.set("show_boxes", showBoxesInput.checked);
+  formData.set("show_labels", showLabelsInput.checked);
+  formData.set("show_conf", showConfInput.checked);
 
   setLoading(true);
   try {
@@ -345,12 +422,68 @@ async function submitImage(event) {
     renderResult(data);
   } catch (error) {
     verdictTitle.textContent = "Can not analyzing image";
-    scoreChip.textContent = "ERR";
+    scoreChip.textContent = "ERROR";
     scoreChip.className = "score-chip defect";
     predictionRows.innerHTML = `<tr><td colspan="4">${escapeHtml(error.message)}</td></tr>`;
   } finally {
     setLoading(false);
   }
+}
+
+function schedulePredictionForModelChange() {
+  if (!selectedFile || !overlayImage.src) {
+    return;
+  }
+
+  window.clearTimeout(modelChangeTimer);
+  modelChangeTimer = window.setTimeout(() => {
+    if (!submitButton.disabled) {
+      form.requestSubmit();
+    }
+  }, 500);
+}
+
+function buildResultFilename() {
+  const originalName = selectedFile?.name || "image.jpg";
+  const nameWithoutExtension = originalName.replace(/\.[^.]+$/, "");
+  return `${nameWithoutExtension}_prediction.jpg`;
+}
+
+async function saveResultImage() {
+  if (!overlayImage.src) {
+    return;
+  }
+
+  const suggestedName = buildResultFilename();
+
+  if ("showSaveFilePicker" in window) {
+    try {
+      const fileHandle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{
+          description: "JPEG image",
+          accept: { "image/jpeg": [".jpg", ".jpeg"] },
+        }],
+      });
+      const response = await fetch(overlayImage.src);
+      const writable = await fileHandle.createWritable();
+      await writable.write(await response.blob());
+      await writable.close();
+      return;
+    } catch (error) {
+      if (error.name === "AbortError") {
+        return;
+      }
+      console.error("Could not save image:", error);
+    }
+  }
+
+  const link = document.createElement("a");
+  link.href = overlayImage.src;
+  link.download = suggestedName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 imageInput.addEventListener("change", (event) => {
@@ -387,15 +520,19 @@ resetButton.addEventListener("click", () => {
 
 confInput.addEventListener("input", updateRangeLabels);
 iouInput.addEventListener("input", updateRangeLabels);
+unetThresholdInput.addEventListener("input", updateRangeLabels);
+roiMarginInput.addEventListener("input", updateRangeLabels);
+yoloModelInput.addEventListener("change", schedulePredictionForModelChange);
+unetModelInput.addEventListener("change", schedulePredictionForModelChange);
 form.addEventListener("submit", submitImage);
+downloadButton.addEventListener("click", saveResultImage);
 
 tabButtons.forEach((button) => {
   button.addEventListener("click", () => setActiveTab(button.dataset.tab));
 });
 
 previewViewer = createImageViewer(previewFrame, [previewImage]);
-resultViewer = createImageViewer(imageStage, [overlayImage, maskImage]);
+resultViewer = createImageViewer(imageStage, [overlayImage, maskImage, unetMaskImage]);
 updateRangeLabels();
 resetResult();
 loadHealth();
-

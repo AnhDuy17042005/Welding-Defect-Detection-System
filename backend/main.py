@@ -11,23 +11,31 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.model_service import YoloSegmentationService
+from backend.model_service import BOXES, CONF, LABELS, MASKS, YoloSegmentationService
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
-DEFAULT_MODEL_PATH = BASE_DIR / "models" / "runs" / "train_ver2" / "weights" / "best.pt"
-
-
-def resolve_path(value: str | None, default: Path) -> Path:
-    if not value:
-        return default
-
-    path = Path(value).expanduser()
-    if path.is_absolute():
-        return path
-
-    return (BASE_DIR / path).resolve()
+YOLO_MODELS = {
+    f"yolo_ver{version}": (
+        BASE_DIR / "models" / "runs" / f"train_ver{version}" / "weights" / "best.pt"
+    )
+    for version in range(1, 6)
+}
+UNET_MODELS = {
+    f"unet_ver{version}": (
+        BASE_DIR / "models" / "unet" / f"train_ver{version}" / "best.pth"
+    )
+    for version in range(1, 4)
+}
+YOLO_MODEL_LABELS = {
+    model_id: f"YOLOv11 Ver {version}"
+    for version, model_id in enumerate(YOLO_MODELS, start=1)
+}
+UNET_MODEL_LABELS = {
+    model_id: f"U-Net Ver {version}"
+    for version, model_id in enumerate(UNET_MODELS, start=1)
+}
 
 
 def get_max_upload_bytes() -> int:
@@ -37,9 +45,17 @@ def get_max_upload_bytes() -> int:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    model_path = resolve_path(os.getenv("MODEL_PATH"), DEFAULT_MODEL_PATH)
-    device = os.getenv("YOLO_DEVICE") or None
-    app.state.yolo_service = YoloSegmentationService(model_path=model_path, device=device)
+    app.state.yolo_service = YoloSegmentationService(
+        yolo_models=YOLO_MODELS,
+        unet_models=UNET_MODELS,
+        default_yolo_model=os.getenv("YOLO_MODEL_ID", "yolo_ver5"),
+        default_unet_model=os.getenv("UNET_MODEL_ID", "unet_ver3"),
+        device=os.getenv("YOLO_DEVICE") or None,
+        unet_device=os.getenv("UNET_DEVICE", "auto"),
+        unet_threshold=float(os.getenv("UNET_THRESHOLD", "0.25")),
+        roi_margin=float(os.getenv("ROI_MARGIN", "0.50")),
+    )
+
     app.state.max_upload_bytes = get_max_upload_bytes()
     yield
 
@@ -69,9 +85,25 @@ def index() -> FileResponse:
 def health(request: Request) -> dict[str, Any]:
     service = get_service(request)
     return {
+        "model_name": "YOLOv11 + U-Net",
         "status": "ok",
         "model_path": str(service.model_path),
         "classes": service.names,
+        "unet_threshold": service.unet_threshold,
+        "roi_margin": service.roi_margin,
+        "unet_imgsz": service.unet_img_size,
+        "models": {
+            "yolo": [
+                {"id": model_id, "label": YOLO_MODEL_LABELS[model_id]}
+                for model_id in YOLO_MODELS
+            ],
+            "unet": [
+                {"id": model_id, "label": UNET_MODEL_LABELS[model_id]}
+                for model_id in UNET_MODELS
+            ],
+            "selected_yolo": service.active_yolo_model,
+            "selected_unet": service.active_unet_model,
+        },
     }
 
 
@@ -88,6 +120,15 @@ async def predict(
     conf: float = Form(0.25),
     iou: float = Form(0.25),
     imgsz: int = Form(960),
+    yolo_model: str = Form("yolo_ver5"),
+    unet_model: str = Form("unet_ver3"),
+    unet_imgsz: int = Form(512),
+    unet_threshold: float = Form(0.25),
+    roi_margin: float = Form(0.40),
+    show_masks: bool = Form(MASKS),
+    show_boxes: bool = Form(BOXES),
+    show_labels: bool = Form(LABELS),
+    show_conf: bool = Form(CONF),
 ) -> dict[str, Any]:
     if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="Only image uploads are supported.")
@@ -99,7 +140,21 @@ async def predict(
 
     try:
         service = get_service(request)
-        result = service.predict(image_bytes=image_bytes, conf=conf, iou=iou, imgsz=imgsz)
+        result = service.predict(
+            image_bytes=image_bytes,
+            conf=conf,
+            iou=iou,
+            imgsz=imgsz,
+            yolo_model=yolo_model,
+            unet_model=unet_model,
+            unet_imgsz=unet_imgsz,
+            unet_threshold=unet_threshold,
+            roi_margin=roi_margin,
+            show_masks=show_masks,
+            show_boxes=show_boxes,
+            show_labels=show_labels,
+            show_conf=show_conf,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:

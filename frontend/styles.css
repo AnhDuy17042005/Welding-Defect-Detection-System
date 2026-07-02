@@ -124,7 +124,7 @@ h2 {
 
 .control-panel {
   flex: 0 0 380px;
-  padding: 18px;
+  padding: 14px;
 }
 
 .result-panel {
@@ -135,15 +135,15 @@ h2 {
 
 .upload-form {
   display: grid;
-  gap: 16px;
+  gap: 10px;
 }
 
 .file-drop {
-  min-height: 112px;
+  min-height: 68px;
   display: grid;
   place-items: center;
   gap: 6px;
-  padding: 18px;
+  padding: 8px;
   border: 1.5px dashed #9fb7b8;
   border-radius: 8px;
   background: #f8fbfa;
@@ -191,7 +191,7 @@ h2 {
 
 .preview-frame {
   width: 100%;
-  height: clamp(220px, 32vh, 380px);
+  height: clamp(190px, 25vh, 270px);
   aspect-ratio: 4 / 3;
 }
 
@@ -275,13 +275,19 @@ h2 {
 
 .settings-grid {
   display: grid;
-  gap: 14px;
+  gap: 8px;
+}
+
+.model-config-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 108px;
+  gap: 8px;
 }
 
 .settings-grid label {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 8px 12px;
+  gap: 4px 12px;
   align-items: center;
 }
 
@@ -296,15 +302,59 @@ h2 {
 }
 
 .settings-grid select {
-  min-height: 38px;
+  min-height: 34px;
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
 }
 
+.display-settings {
+  min-width: 0;
+  margin: 0;
+  padding: 6px 10px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.display-settings legend {
+  padding: 0 5px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.display-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 12px;
+}
+
+.settings-grid .display-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.display-option input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--teal);
+}
+
 .actions {
   gap: 10px;
+}
+
+.result-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.result-header-actions .ghost-button {
+  min-height: 40px;
 }
 
 button {
@@ -474,6 +524,10 @@ td {
   .metrics {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .result-header-actions {
+    justify-content: flex-end;
   }
 
   .health {
