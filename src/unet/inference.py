@@ -1,3 +1,13 @@
+"""
+    Inference script for U-Net ripple segmentation.
+
+    Purpose:
+        1. Load trained U-Net checkpoint.
+        2. Predict binary ripple mask from one input image.
+        3. Apply post-processing to clean the mask.
+        4. Save overlay result for visual inspection.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -8,22 +18,30 @@ import cv2
 import numpy as np
 import torch
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+"""Support both direct script run and package import"""
 if __package__ in (None, ""):
-    sys.path.insert(0, str(BASE_DIR))
+    sys.path.insert(0, str(PROJECT_ROOT))
     from src.unet.post_processing import post_process_mask
     from src.unet.unet import build
 else:
     from .post_processing import post_process_mask
     from .unet import build
 
-DEFAULT_IMAGE_PATH = BASE_DIR / "dataset" / "test" / "26.jpg"
+from configs.unet import (
+    IMAGENET_MEAN as IMAGENET_MEAN_VALUES,
+    IMAGENET_STD as IMAGENET_STD_VALUES,
+    UNET_DEFAULT_IMAGE,
+    UNET_DEVICE,
+    UNET_MODEL,
+    UNET_OUTPUT_DIR,
+    UNET_THRESHOLD,
+)
 
-DEFAULT_MODEL_PATH = BASE_DIR / "models" / "unet" / "train_ver2" / "best.pth"
-DEFAULT_OUTPUT_DIR = BASE_DIR / "output" / "unet2"
-
-IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+IMAGENET_MEAN = np.asarray(IMAGENET_MEAN_VALUES, dtype=np.float32)
+IMAGENET_STD = np.asarray(IMAGENET_STD_VALUES, dtype=np.float32)
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,15 +49,19 @@ def parse_args() -> argparse.Namespace:
         Parse command line arguments.
     """
 
-    parser = argparse.ArgumentParser(description="Predict ripple mask with U-Net.")
+    parser = argparse.ArgumentParser(
+        description="Predict ripple mask with U-Net."
+    )
 
-    parser.add_argument("--image", type=Path, default=DEFAULT_IMAGE_PATH)
-    parser.add_argument("--model", type=Path, default=DEFAULT_MODEL_PATH)
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    """Input/output paths"""
+    parser.add_argument("--image", type=Path, default=UNET_DEFAULT_IMAGE)
+    parser.add_argument("--model", type=Path, default=UNET_MODEL)
+    parser.add_argument("--output-dir", type=Path, default=UNET_OUTPUT_DIR)
 
+    """Inference settings"""
     parser.add_argument("--img-size", type=int, default=None)
-    parser.add_argument("--threshold", type=float, default=0.5)
-    parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--threshold", type=float, default=UNET_THRESHOLD)
+    parser.add_argument("--device", type=str, default=UNET_DEVICE)
 
     return parser.parse_args()
 
@@ -47,10 +69,15 @@ def parse_args() -> argparse.Namespace:
 def load_image(image_path: Path) -> np.ndarray:
     """
         Load image with OpenCV.
+
+        Returns:
+            BGR image as numpy array.
     """
 
+    """Read image from disk"""
     image = cv2.imread(str(image_path))
 
+    """Raise error if image cannot be loaded"""
     if image is None:
         raise FileNotFoundError(f"Cannot read image: {image_path}")
 
@@ -58,22 +85,50 @@ def load_image(image_path: Path) -> np.ndarray:
 
 
 def get_device(device: str) -> torch.device:
+    """
+        Select inference device.
+
+        Args:
+            device:
+                "auto", "cuda", or "cpu".
+    """
+
+    """Automatically use GPU if available"""
     if device == "auto":
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    """Use user-defined device"""
     return torch.device(device)
 
 
-def load_model(model_path: Path, device: torch.device, img_size: int | None):
+def load_model(
+    model_path: Path,
+    device: torch.device,
+    img_size: int | None
+):
     """
-        Load U-Net checkpoint saved by unet/train.py.
+        Load U-Net checkpoint saved by train.py.
+
+        Supports:
+            - full checkpoint dictionary
+            - raw model state_dict
+
+        Returns:
+            model:
+                Loaded U-Net model.
+
+            input_size:
+                Image size used for inference.
     """
 
+    """Check checkpoint path"""
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")
 
+    """Load checkpoint to selected device"""
     checkpoint = torch.load(model_path, map_location=device)
 
+    """Extract model weights and training arguments"""
     if isinstance(checkpoint, dict) and "model" in checkpoint:
         state_dict = checkpoint["model"]
         train_args = checkpoint.get("args", {}) or {}
@@ -81,27 +136,65 @@ def load_model(model_path: Path, device: torch.device, img_size: int | None):
         state_dict = checkpoint
         train_args = {}
 
+    """Infer base channel from first convolution layer"""
     first_conv = state_dict.get("enc1.block.0.weight")
     base_channel = int(first_conv.shape[0]) if first_conv is not None else 64
+
+    """Use input image size from argument or checkpoint"""
     input_size = img_size or int(train_args.get("img_size", 256))
 
-    model = build(in_channels=3, num_classes=1, base_channels=base_channel)
+    """Build U-Net model with the same width as checkpoint"""
+    model = build(
+        in_channels=3,
+        num_classes=1,
+        base_channels=base_channel
+    )
+
+    """Load trained weights"""
     model.load_state_dict(state_dict)
+
+    """Move model to device and set evaluation mode"""
     model.to(device)
     model.eval()
 
     return model, input_size
 
 
-def preprocess(image: np.ndarray, img_size: int, device: torch.device) -> torch.Tensor:
+def preprocess(
+    image: np.ndarray,
+    img_size: int,
+    device: torch.device
+) -> torch.Tensor:
     """
-        BGR OpenCV image to normalized NCHW tensor.
+        Convert OpenCV BGR image to normalized NCHW tensor.
+
+        Processing:
+            BGR → RGB
+            resize
+            normalize
+            HWC → CHW
+            add batch dimension
     """
 
+    """Convert BGR to RGB"""
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    resized = cv2.resize(rgb, (img_size, img_size), interpolation=cv2.INTER_LINEAR)
-    normalized = (resized.astype(np.float32) / 255.0 - IMAGENET_MEAN) / IMAGENET_STD
-    tensor = torch.from_numpy(normalized.transpose(2, 0, 1)).unsqueeze(0)
+
+    """Resize image to model input size"""
+    resized = cv2.resize(
+        rgb,
+        (img_size, img_size),
+        interpolation=cv2.INTER_LINEAR
+    )
+
+    """Normalize image using ImageNet statistics"""
+    normalized = (
+        resized.astype(np.float32) / 255.0 - IMAGENET_MEAN
+    ) / IMAGENET_STD
+
+    """Convert HWC numpy image to NCHW torch tensor"""
+    tensor = torch.from_numpy(
+        normalized.transpose(2, 0, 1)
+    ).unsqueeze(0)
 
     return tensor.to(device)
 
@@ -115,30 +208,56 @@ def predict(
     device: torch.device,
 ) -> np.ndarray:
     """
-        Run U-Net prediction on one image and return a binary mask.
+        Run U-Net prediction on one image.
+
+        Returns:
+            Binary mask with values 0 and 255.
     """
 
+    """Store original image size"""
     h, w = image.shape[:2]
+
+    """Preprocess image for U-Net"""
     tensor = preprocess(image, img_size, device)
 
+    """Forward pass"""
     logits = model(tensor)
-    prob = torch.sigmoid(logits).squeeze().cpu().numpy()
-    prob = cv2.resize(prob, (w, h), interpolation=cv2.INTER_LINEAR)
 
+    """Convert logits to probability map"""
+    prob = torch.sigmoid(logits).squeeze().cpu().numpy()
+
+    """Resize probability map back to original image size"""
+    prob = cv2.resize(
+        prob,
+        (w, h),
+        interpolation=cv2.INTER_LINEAR
+    )
+
+    """Apply threshold to create binary mask"""
     return (prob >= threshold).astype(np.uint8) * 255
 
 
 def make_overlay(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
-        Overlay predicted mask on the original image.
+        Overlay predicted ripple mask on the original image.
     """
 
+    """Create green color mask"""
     color = np.zeros_like(image)
     color[mask > 0] = (0, 255, 0)
 
+    """Find active mask pixels"""
     overlay = image.copy()
     active = mask > 0
-    overlay[active] = cv2.addWeighted(image, 0.65, color, 0.35, 0)[active]
+
+    """Blend original image and green mask only on ripple pixels"""
+    overlay[active] = cv2.addWeighted(
+        image,
+        0.65,
+        color,
+        0.35,
+        0
+    )[active]
 
     return overlay
 
@@ -148,36 +267,74 @@ def save_image(path: Path, image: np.ndarray) -> None:
         Save image and raise error if saving fails.
     """
 
+    """Save image to disk"""
     success = cv2.imwrite(str(path), image)
 
+    """Check saving result"""
     if not success:
         raise RuntimeError(f"Failed to save image: {path}")
 
 
-def save_outputs(output_dir: Path, image_path: Path, image: np.ndarray, mask: np.ndarray) -> None:
+def save_outputs(
+    output_dir: Path,
+    image_path: Path,
+    image: np.ndarray,
+    mask: np.ndarray
+) -> None:
     """
-        Save predicted mask and overlay.
+        Save predicted overlay result.
     """
 
+    """Create output directory"""
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    """Use input image name as output prefix"""
     stem = image_path.stem
-    # save_image(output_dir / f"{stem}_mask.png", mask)
-    save_image(output_dir / f"{stem}_prediction.jpg", make_overlay(image, mask))
+
+    """Save overlay prediction"""
+    save_image(
+        output_dir / f"{stem}_prediction.jpg",
+        make_overlay(image, mask)
+    )
 
 
 def main() -> None:
+    """
+        Main inference function.
+
+        Steps:
+            1. Parse arguments
+            2. Load image
+            3. Load U-Net model
+            4. Predict ripple mask
+            5. Post-process mask
+            6. Save overlay result
+    """
+
+    """Parse command line arguments"""
     args = parse_args()
 
+    """Create output directory"""
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
+    """Print input information"""
     print(f"Image: {args.image}")
     print(f"Model: {args.model}")
 
+    """Prepare device"""
     device = get_device(args.device)
-    image = load_image(args.image)
-    model, img_size = load_model(args.model, device, args.img_size)
 
+    """Load input image"""
+    image = load_image(args.image)
+
+    """Load trained U-Net model"""
+    model, img_size = load_model(
+        args.model,
+        device,
+        args.img_size
+    )
+
+    """Predict raw binary mask"""
     mask = predict(
         model=model,
         image=image,
@@ -185,8 +342,11 @@ def main() -> None:
         threshold=args.threshold,
         device=device,
     )
+
+    """Clean predicted mask"""
     mask = post_process_mask(mask)
 
+    """Save final output"""
     save_outputs(
         output_dir=args.output_dir,
         image_path=args.image,
@@ -194,6 +354,7 @@ def main() -> None:
         mask=mask,
     )
 
+    """Print output information"""
     print(f"Image size: {img_size}")
     print(f"Saved outputs to: {args.output_dir}")
 

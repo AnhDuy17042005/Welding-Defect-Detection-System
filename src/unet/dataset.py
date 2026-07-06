@@ -30,6 +30,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
+
+from configs.data import IMAGE_EXTENSIONS
+from configs.unet import (
+    UNET_BATCH_SIZE,
+    UNET_IMAGE_SIZE,
+    UNET_NUM_WORKERS,
+    UNET_TRAIN_DATA,
+)
 from .augment import (
     get_train_transforms,
     get_val_transforms
@@ -54,10 +62,9 @@ class RippleDataset(Dataset):
         self.transform = transform
 
         """Match images to masks by stem name"""
-        exts = {".jpg", ".jpeg", ".png", ".bmp"}
         self.images = sorted([
             p for p in self.image_dir.iterdir()
-            if p.suffix.lower() in exts
+            if p.suffix.lower() in IMAGE_EXTENSIONS
         ])
 
         """Verify all masks exist"""
@@ -100,9 +107,9 @@ class RippleDataset(Dataset):
     
 def build_dataloaders(
         data_root: str,
-        img_size: int = 256,
-        batch_size: int = 8,
-        num_workers: int = 2,
+        img_size: int = UNET_IMAGE_SIZE,
+        batch_size: int = UNET_BATCH_SIZE,
+        num_workers: int = UNET_NUM_WORKERS,
         pin_memory: bool = True,
     ):
     """
@@ -180,10 +187,10 @@ def build_dataloaders(
 
 if __name__ == "__main__":
     train_loader, valid_loader, test_loader = build_dataloaders(
-        data_root="ripple_unet",
-        img_size=256,
-        batch_size=4,
-        num_workers=2
+        data_root=UNET_TRAIN_DATA,
+        img_size=UNET_IMAGE_SIZE,
+        batch_size=UNET_BATCH_SIZE,
+        num_workers=UNET_NUM_WORKERS,
     )
 
     images, masks = next(iter(train_loader))

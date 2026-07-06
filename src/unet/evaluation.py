@@ -1,326 +1,496 @@
-"""Evaluate a trained U-Net ripple segmentation model.
-
-Run from the project root:
-
-    python unet/evaluation.py
-
-or:
-
-    python -m unet.evaluation \
-        --model models/unet/best.pth \
-        --data dataset/ripple_split \
-        --split test
-
-The output directory contains aggregate metrics and comparison images showing
-the original image, ground truth, and prediction side by side.
+"""
+    Evaluate a binary U-Net checkpoint and export segmentation metrics
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-
-# Support both `python unet/evaluation.py` and `python -m unet.evaluation`.
-if __package__ in (None, ""):
-    sys.path.insert(0, str(BASE_DIR))
-    from unet.augment import get_val_transforms
-    from unet.dataset import RippleDataset
-    from unet.inference import get_device, load_model
-    from unet.losses import BCEDiceLoss
-else:
-    from .augment import get_val_transforms
-    from .dataset import RippleDataset
-    from .inference import get_device, load_model
-    from .losses import BCEDiceLoss
+"""Project Root"""
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-DEFAULT_MODEL_PATH = BASE_DIR / "models" / "unet" / "best.pth"
-DEFAULT_DATA_ROOT  = BASE_DIR / "dataset" / "ripple_split"
-DEFAULT_OUTPUT_DIR = BASE_DIR / "evaluation" / "unet"
+"""Config Imports"""
+from configs.data import IMAGE_EXTENSIONS
+from configs.path import METRICS_DIR
+from configs.unet import (
+    RIPPLE_ROI_DATASET,
+    UNET_DEVICE,
+    UNET_MODEL,
+    UNET_THRESHOLD,
+)
 
-EPSILON = 1e-8
+
+"""U-Net Inference Imports"""
+from src.unet.inference import get_device, load_model, preprocess
+from src.unet.post_processing import post_process_mask
+
+
+"""Default Output Directory"""
+DEFAULT_OUTPUT_DIR = METRICS_DIR / "unet"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate U-Net ripple segmentation.")
-    parser.add_argument("--model", type=Path, default=DEFAULT_MODEL_PATH)
-    parser.add_argument("--data", type=Path, default=DEFAULT_DATA_ROOT)
-    parser.add_argument("--split", choices=("train", "valid", "test"), default="test")
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--img-size", type=int, default=None)
-    parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--num-workers", type=int, default=2)
-    parser.add_argument("--threshold", type=float, default=0.5)
-    parser.add_argument("--device", type=str, default="auto")
-    parser.add_argument(
-        "--max-visualizations",
-        type=int,
-        default=20,
-        help="Maximum number of comparison images to save; use 0 to disable.",
+    """
+        Parse command line arguments for U-Net evaluation.
+
+        Args:
+            --model      : path to U-Net checkpoint
+            --data       : path to ROI dataset
+            --split      : train / valid / test split
+            --img-size   : optional inference image size
+            --threshold  : probability threshold for binary mask
+            --device     : cpu / cuda / auto
+            --output-dir : directory to save metrics
+            --max-images : optional image limit for quick test
+    """
+
+    parser = argparse.ArgumentParser(
+        description="Evaluate U-Net ripple segmentation on a dataset split."
     )
+
+    """Input Arguments"""
+    parser.add_argument("--model", type=Path, default=UNET_MODEL)
+    parser.add_argument("--data", type=Path, default=RIPPLE_ROI_DATASET)
+    parser.add_argument("--split", choices=("train", "valid", "test"), default="test")
+
+    """Inference Arguments"""
+    parser.add_argument("--img-size", type=int, default=None)
+    parser.add_argument("--threshold", type=float, default=UNET_THRESHOLD)
+    parser.add_argument("--device", type=str, default=UNET_DEVICE)
+
+    """Output Arguments"""
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+
+    """Smoke Test Argument"""
+    parser.add_argument(
+        "--max-images",
+        type=int,
+        default=None,
+        help="Optional limit for a quick smoke test.",
+    )
+
     args = parser.parse_args()
 
+    """Validate Image Size"""
+    if args.img_size is not None and args.img_size < 32:
+        parser.error("--img-size must be at least 32")
+
+    """Validate Threshold"""
     if not 0.0 <= args.threshold <= 1.0:
         parser.error("--threshold must be between 0 and 1")
-    if args.batch_size < 1:
-        parser.error("--batch-size must be at least 1")
-    if args.num_workers < 0:
-        parser.error("--num-workers cannot be negative")
-    if args.max_visualizations < 0:
-        parser.error("--max-visualizations cannot be negative")
+
+    """Validate Max Images"""
+    if args.max_images is not None and args.max_images < 1:
+        parser.error("--max-images must be at least 1")
 
     return args
 
 
-def confusion_counts(
-    prediction: torch.Tensor,
-    target: torch.Tensor,
-) -> tuple[int, int, int, int]:
-    prediction = prediction.bool()
-    target = target.bool()
+def find_image_mask_pairs(data_root: Path, split: str) -> list[tuple[Path, Path]]:
+    """
+        Find image-mask pairs from a dataset split.
 
-    true_positive = int(torch.logical_and(prediction, target).sum().item())
-    false_positive = int(torch.logical_and(prediction, ~target).sum().item())
-    false_negative = int(torch.logical_and(~prediction, target).sum().item())
-    true_negative = int(torch.logical_and(~prediction, ~target).sum().item())
-    
-    return true_positive, false_positive, false_negative, true_negative
+        Dataset structure:
+            data_root/
+            ├── train/
+            │   ├── images/
+            │   └── masks/
+            ├── valid/
+            │   ├── images/
+            │   └── masks/
+            └── test/
+                ├── images/
+                └── masks/
+
+        Mask rule:
+            image name : abc.jpg
+            mask name  : abc.png
+    """
+
+    """Dataset Directories"""
+    image_dir = data_root / split / "images"
+    mask_dir = data_root / split / "masks"
+
+    """Check Image Directory"""
+    if not image_dir.is_dir():
+        raise FileNotFoundError(f"Image directory not found: {image_dir}")
+
+    """Check Mask Directory"""
+    if not mask_dir.is_dir():
+        raise FileNotFoundError(f"Mask directory not found: {mask_dir}")
+
+    """Collect Images"""
+    images = sorted(
+        path
+        for path in image_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+    )
+
+    """Check Empty Dataset"""
+    if not images:
+        raise ValueError(f"No evaluation images found in: {image_dir}")
+
+    pairs: list[tuple[Path, Path]] = []
+    missing_masks: list[Path] = []
+
+    """Match Each Image With Its Mask"""
+    for image_path in images:
+        mask_path = mask_dir / f"{image_path.stem}.png"
+
+        if mask_path.is_file():
+            pairs.append((image_path, mask_path))
+        else:
+            missing_masks.append(mask_path)
+
+    """Report Missing Masks"""
+    if missing_masks:
+        examples = ", ".join(str(path) for path in missing_masks[:5])
+        raise FileNotFoundError(
+            f"Missing {len(missing_masks)} masks, for example: {examples}"
+        )
+
+    return pairs
 
 
-def metrics_from_counts(tp: int, fp: int, fn: int, tn: int) -> dict[str, float]:
-    total = tp + fp + fn + tn
-    union = tp + fp + fn
+def confusion_counts(prediction: np.ndarray, target: np.ndarray) -> dict[str, int]:
+    """
+        Compute pixel-level confusion matrix.
+
+        Args:
+            prediction: predicted binary mask
+            target    : ground truth binary mask
+
+        Returns:
+            tp: true positive pixels
+            fp: false positive pixels
+            fn: false negative pixels
+            tn: true negative pixels
+    """
+
+    """Convert Masks To Boolean"""
+    prediction = prediction.astype(bool)
+    target = target.astype(bool)
+
+    """Compute Confusion Counts"""
+    return {
+        "tp": int(np.logical_and(prediction, target).sum()),
+        "fp": int(np.logical_and(prediction, np.logical_not(target)).sum()),
+        "fn": int(np.logical_and(np.logical_not(prediction), target).sum()),
+        "tn": int(
+            np.logical_and(
+                np.logical_not(prediction),
+                np.logical_not(target),
+            ).sum()
+        ),
+    }
+
+
+def metrics_from_counts(counts: dict[str, int]) -> dict[str, float | int]:
+    """
+        Compute segmentation metrics from TP, FP, FN, TN.
+
+        Metrics:
+            precision      : TP / (TP + FP)
+            recall         : TP / (TP + FN)
+            specificity    : TN / (TN + FP)
+            iou            : TP / (TP + FP + FN)
+            dice           : 2TP / (2TP + FP + FN)
+            pixel_accuracy : (TP + TN) / total
+    """
+
+    """Read Confusion Counts"""
+    tp = counts["tp"]
+    fp = counts["fp"]
+    fn = counts["fn"]
+    tn = counts["tn"]
+
+    """Metric Denominators"""
     predicted_positive = tp + fp
     actual_positive = tp + fn
-    actual_negative = tn + fp
+    union = tp + fp + fn
+    dice_denominator = 2 * tp + fp + fn
+    total = tp + fp + fn + tn
 
+    """Compute Metrics"""
+    precision = tp / predicted_positive if predicted_positive else float(fn == 0)
+    recall = tp / actual_positive if actual_positive else 1.0
+    specificity = tn / (tn + fp) if (tn + fp) else 1.0
+    iou = tp / union if union else 1.0
+    dice = 2 * tp / dice_denominator if dice_denominator else 1.0
+    accuracy = (tp + tn) / total if total else 1.0
+
+    """Return Counts And Metrics"""
     return {
-        "iou": 1.0 if union == 0 else tp / union,
-        "dice": 1.0 if (2 * tp + fp + fn) == 0 else (2 * tp) / (2 * tp + fp + fn),
-        "precision": 1.0 if predicted_positive == 0 and actual_positive == 0 else tp / max(predicted_positive, EPSILON),
-        "recall": 1.0 if actual_positive == 0 and predicted_positive == 0 else tp / max(actual_positive, EPSILON),
-        "specificity": tn / max(actual_negative, EPSILON),
-        "pixel_accuracy": (tp + tn) / max(total, EPSILON),
+        **counts,
+        "precision": precision,
+        "recall": recall,
+        "specificity": specificity,
+        "iou": iou,
+        "dice": dice,
+        "pixel_accuracy": accuracy,
     }
 
 
-def save_image(path: Path, image: np.ndarray) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not cv2.imwrite(str(path), image):
-        raise RuntimeError(f"Failed to save image: {path}")
+def add_counts(total: dict[str, int], current: dict[str, int]) -> None:
+    """
+        Add current image confusion counts to total counts.
+
+        Used for global metrics.
+    """
+
+    """Accumulate TP, FP, FN, TN"""
+    for key in total:
+        total[key] += current[key]
 
 
-def add_title(image: np.ndarray, title: str) -> np.ndarray:
-    bar_height = 42
-    panel = cv2.copyMakeBorder(
-        image,
-        bar_height,
-        0,
-        0,
-        0,
-        borderType=cv2.BORDER_CONSTANT,
-        value=(28, 28, 28),
-    )
-    cv2.putText(
-        panel,
-        title,
-        (12, 28),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.65,
-        (255, 255, 255),
-        2,
-        cv2.LINE_AA,
-    )
-    return panel
+def mean_metrics(rows: list[dict[str, Any]], prefix: str) -> dict[str, float]:
+    """
+        Compute mean per-image metrics.
 
+        Args:
+            rows  : list of per-image metric rows
+            prefix: raw / post_processed
+    """
 
-def colorize_mask(mask: np.ndarray, color: tuple[int, int, int]) -> np.ndarray:
-    output = np.zeros((*mask.shape, 3), dtype=np.uint8)
-    output[mask] = color
-    return output
-
-
-def save_visualization(
-    output_dir: Path,
-    image_path: Path,
-    prediction: np.ndarray,
-    target: np.ndarray,
-    image_metrics: dict[str, float],
-) -> None:
-    image = cv2.imread(str(image_path))
-    if image is None:
-        raise FileNotFoundError(f"Cannot read image for visualization: {image_path}")
-
-    height, width = target.shape
-    image = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
-
-    ground_truth_panel = colorize_mask(target, (0, 255, 0))
-    prediction_panel = colorize_mask(prediction, (0, 255, 255))
-
-    panels = [
-        add_title(image, "Original"),
-        add_title(ground_truth_panel, "Ground truth"),
-        add_title(prediction_panel, "Prediction"),
-    ]
-    comparison = np.concatenate(panels, axis=1)
-
-    footer_height = 44
-    comparison = cv2.copyMakeBorder(
-        comparison,
-        0,
-        footer_height,
-        0,
-        0,
-        borderType=cv2.BORDER_CONSTANT,
-        value=(28, 28, 28),
-    )
-    summary = (
-        f"IoU {image_metrics['iou']:.4f}   "
-        f"Dice {image_metrics['dice']:.4f}   "
-        f"Precision {image_metrics['precision']:.4f}   "
-        f"Recall {image_metrics['recall']:.4f}"
-    )
-    cv2.putText(
-        comparison,
-        summary,
-        (12, comparison.shape[0] - 14),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.65,
-        (255, 255, 255),
-        2,
-        cv2.LINE_AA,
-    )
-    save_image(
-        output_dir / "visualizations" / f"{image_path.stem}_comparison.jpg",
-        comparison,
+    """Metric Names"""
+    names = (
+        "precision",
+        "recall",
+        "specificity",
+        "iou",
+        "dice",
+        "pixel_accuracy",
     )
 
-
-def save_reports(
-    output_dir: Path,
-    summary: dict[str, Any],
-) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    with (output_dir / "metrics.json").open("w", encoding="utf-8") as file:
-        json.dump(summary, file, indent=2, ensure_ascii=False)
-
-
-@torch.inference_mode()
-def evaluate(args: argparse.Namespace) -> dict[str, Any]:
-    device = get_device(args.device)
-    model, img_size = load_model(args.model, device, args.img_size)
-
-    split_dir = args.data / args.split
-    dataset = RippleDataset(
-        image_dir=split_dir / "images",
-        mask_dir=split_dir / "masks",
-        transform=get_val_transforms(img_size),
-    )
-    if len(dataset) == 0:
-        raise ValueError(f"No images found in: {split_dir / 'images'}")
-
-    loader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=device.type == "cuda",
-        persistent_workers=args.num_workers > 0,
-    )
-    criterion = BCEDiceLoss(alpha=0.5)
-
-    total_loss = 0.0
-    total_tp = total_fp = total_fn = total_tn = 0
-    image_index = 0
-
-    for images, targets in loader:
-        images = images.to(device, non_blocking=True)
-        targets = targets.to(device, non_blocking=True)
-        logits = model(images)
-        predictions = torch.sigmoid(logits) >= args.threshold
-
-        for batch_index in range(images.shape[0]):
-            image_loss = float(
-                criterion(
-                    logits[batch_index : batch_index + 1],
-                    targets[batch_index : batch_index + 1],
-                ).item()
-            )
-            tp, fp, fn, tn = confusion_counts(
-                predictions[batch_index], targets[batch_index] >= 0.5
-            )
-            image_metrics = metrics_from_counts(tp, fp, fn, tn)
-            image_path = dataset.images[image_index]
-
-            prediction_mask = predictions[batch_index, 0].cpu().numpy()
-            target_mask = (targets[batch_index, 0] >= 0.5).cpu().numpy()
-
-            if image_index < args.max_visualizations:
-                save_visualization(
-                    output_dir=args.output_dir,
-                    image_path=image_path,
-                    prediction=prediction_mask,
-                    target=target_mask,
-                    image_metrics=image_metrics,
-                )
-
-            total_loss += image_loss
-            total_tp += tp
-            total_fp += fp
-            total_fn += fn
-            total_tn += tn
-            image_index += 1
-
-    aggregate_metrics = metrics_from_counts(total_tp, total_fp, total_fn, total_tn)
-    summary: dict[str, Any] = {
-        "model": str(args.model.resolve()),
-        "data": str(args.data.resolve()),
-        "split": args.split,
-        "device": str(device),
-        "samples": len(dataset),
-        "img_size": img_size,
-        "threshold": args.threshold,
-        "loss": round(total_loss / len(dataset), 6),
-        **{key: round(value, 6) for key, value in aggregate_metrics.items()},
-        "confusion_counts": {
-            "true_positive": total_tp,
-            "false_positive": total_fp,
-            "false_negative": total_fn,
-            "true_negative": total_tn,
-        },
+    """Average Each Metric"""
+    return {
+        name: float(np.mean([row[f"{prefix}_{name}"] for row in rows]))
+        for name in names
     }
-    save_reports(args.output_dir, summary)
-    return summary
+
+
+def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    """
+        Write per-image metrics to CSV file.
+
+        Args:
+            path: output CSV path
+            rows: per-image metric rows
+    """
+
+    """Write CSV"""
+    with path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def main() -> None:
+    """
+        Evaluate U-Net model on one dataset split.
+
+        Pipeline:
+            1. Parse arguments
+            2. Load image-mask pairs
+            3. Load U-Net checkpoint
+            4. Predict binary mask
+            5. Apply post-processing
+            6. Compute metrics
+            7. Save JSON and CSV reports
+    """
+
+    """Parse Arguments"""
     args = parse_args()
-    summary = evaluate(args)
 
-    print("\nU-Net evaluation")
-    print(f"Model:     {summary['model']}")
-    print(f"Split:     {summary['split']} ({summary['samples']} samples)")
-    print(f"Device:    {summary['device']}")
-    print(f"Image size:{summary['img_size']}")
-    print(f"Loss:      {summary['loss']:.4f}")
-    print(f"IoU:       {summary['iou']:.4f}")
-    print(f"Dice:      {summary['dice']:.4f}")
-    print(f"Precision: {summary['precision']:.4f}")
-    print(f"Recall:    {summary['recall']:.4f}")
-    print(f"Saved to:  {args.output_dir.resolve()}")
+    """Resolve Paths"""
+    model_path = args.model.resolve()
+    data_root = args.data.resolve()
+    output_dir = args.output_dir.resolve()
+
+    """Check Model Checkpoint"""
+    if not model_path.is_file():
+        raise FileNotFoundError(f"U-Net checkpoint not found: {model_path}")
+
+    """Find Evaluation Pairs"""
+    pairs = find_image_mask_pairs(data_root, args.split)
+
+    """Limit Images For Smoke Test"""
+    if args.max_images is not None:
+        pairs = pairs[: args.max_images]
+
+    """Load Device And Model"""
+    device = get_device(args.device)
+    model, img_size = load_model(model_path, device, args.img_size)
+
+    """Create Output Directory"""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    """Global Raw Counts"""
+    raw_total = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+
+    """Global Post-processed Counts"""
+    processed_total = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+
+    """Per-image Metric Rows"""
+    per_image: list[dict[str, Any]] = []
+
+    """Start Timer"""
+    started = time.perf_counter()
+
+    """Evaluate Each Image"""
+    for image_path, mask_path in pairs:
+        """Read Image And Mask"""
+        image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        target_image = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+
+        """Check Image"""
+        if image is None:
+            raise ValueError(f"Cannot read image: {image_path}")
+
+        """Check Mask"""
+        if target_image is None:
+            raise ValueError(f"Cannot read mask: {mask_path}")
+
+        """Check Image-Mask Size"""
+        if image.shape[:2] != target_image.shape[:2]:
+            raise ValueError(
+                f"Image and mask size differ for {image_path.name}: "
+                f"{image.shape[:2]} != {target_image.shape[:2]}"
+            )
+
+        """Preprocess Image"""
+        tensor = preprocess(image, img_size, device)
+
+        """Model Inference"""
+        with torch.inference_mode():
+            probability = torch.sigmoid(model(tensor))[0, 0].cpu().numpy()
+
+        """Resize Probability Map To Original Size"""
+        probability = cv2.resize(
+            probability,
+            (image.shape[1], image.shape[0]),
+            interpolation=cv2.INTER_LINEAR,
+        )
+
+        """Prepare Target Mask"""
+        target = target_image > 0
+
+        """Raw Prediction"""
+        raw_prediction = probability > args.threshold
+
+        """Post-processed Prediction"""
+        processed_prediction = post_process_mask(raw_prediction) > 0
+
+        """Compute Raw Metrics"""
+        raw_counts = confusion_counts(raw_prediction, target)
+        raw_metrics = metrics_from_counts(raw_counts)
+
+        """Compute Post-processed Metrics"""
+        processed_counts = confusion_counts(processed_prediction, target)
+        processed_metrics = metrics_from_counts(processed_counts)
+
+        """Update Global Counts"""
+        add_counts(raw_total, raw_counts)
+        add_counts(processed_total, processed_counts)
+
+        """Base Row Information"""
+        row: dict[str, Any] = {
+            "image": image_path.name,
+            "width": image.shape[1],
+            "height": image.shape[0],
+            "positive_pixels": int(target.sum()),
+        }
+
+        """Add Raw Metrics To Row"""
+        row.update({f"raw_{key}": value for key, value in raw_metrics.items()})
+
+        """Add Post-processed Metrics To Row"""
+        row.update(
+            {
+                f"post_processed_{key}": value
+                for key, value in processed_metrics.items()
+            }
+        )
+
+        """Save Per-image Row"""
+        per_image.append(row)
+
+    """Elapsed Time"""
+    elapsed_seconds = time.perf_counter() - started
+
+    """Build Evaluation Report"""
+    report = {
+        "model_type": "U-Net binary segmentation",
+        "model": str(model_path),
+        "data": str(data_root),
+        "split": args.split,
+        "image_count": len(per_image),
+
+        """Evaluation Settings"""
+        "settings": {
+            "img_size": img_size,
+            "threshold": args.threshold,
+            "device": str(device),
+            "post_processing": True,
+            "max_images": args.max_images,
+        },
+
+        """Global Metrics"""
+        "global": {
+            "raw": metrics_from_counts(raw_total),
+            "post_processed": metrics_from_counts(processed_total),
+        },
+
+        """Mean Per-image Metrics"""
+        "mean_per_image": {
+            "raw": mean_metrics(per_image, "raw"),
+            "post_processed": mean_metrics(per_image, "post_processed"),
+        },
+
+        """Speed Metrics"""
+        "elapsed_seconds": round(elapsed_seconds, 3),
+        "milliseconds_per_image": round(
+            elapsed_seconds * 1000 / len(per_image),
+            3,
+        ),
+    }
+
+    """Save JSON Report"""
+    metrics_path = output_dir / "metrics.json"
+    metrics_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=True),
+        encoding="utf-8",
+    )
+
+    """Save CSV Report"""
+    write_csv(output_dir / "per_image_metrics.csv", per_image)
+
+    """Print Summary"""
+    processed = report["global"]["post_processed"]
+
+    print("\nU-Net evaluation complete")
+    print(f"Model: {model_path}")
+    print(f"Split: {args.split} ({len(per_image)} images)")
+    print(f"Metrics: {metrics_path}")
+    print(
+        "Post-processed: "
+        f"IoU={processed['iou']:.4f} Dice={processed['dice']:.4f} "
+        f"P={processed['precision']:.4f} R={processed['recall']:.4f}"
+    )
 
 
+"""Run Main"""
 if __name__ == "__main__":
     main()

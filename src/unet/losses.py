@@ -14,6 +14,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from configs.unet import UNET_DICE_ALPHA, UNET_METRIC_THRESHOLD
+
 class DiceLoss(nn.Module):
     """
         Dice Loss = 1 - Dice coefficient.
@@ -49,7 +51,7 @@ class BCEDiceLoss(nn.Module):
         Dice: good at handling class imbalance
         a = 0.5 is a solid default for ripple segmentation.
     """
-    def __init__(self, alpha: float = 0.5, smooth: int = 1):
+    def __init__(self, alpha: float = UNET_DICE_ALPHA, smooth: int = 1):
         super().__init__()
 
         self.alpha = alpha
@@ -64,7 +66,7 @@ class BCEDiceLoss(nn.Module):
 
 @torch.no_grad()
 def compute_iou(logits: torch.Tensor, targets: torch.Tensor, 
-                threshold: float = 0.5) -> float:
+                threshold: float = UNET_METRIC_THRESHOLD) -> float:
     """
         The standard metric for segmentation evaluation.
     """
@@ -86,7 +88,7 @@ def compute_iou(logits: torch.Tensor, targets: torch.Tensor,
 
 @torch.no_grad()
 def compute_dice(logits: torch.Tensor, targets: torch.Tensor,
-                 threshold: float = 0.5) -> float:
+                 threshold: float = UNET_METRIC_THRESHOLD) -> float:
     """
         Dice coefficient (F1 score on pixels). Range [0, 1], higher is better.
     """

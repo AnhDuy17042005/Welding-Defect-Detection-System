@@ -19,6 +19,22 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm.auto import tqdm
 
+from configs.unet import (
+    UNET_BASE_CHANNELS,
+    UNET_BATCH_SIZE,
+    UNET_DICE_ALPHA,
+    UNET_EPOCHS,
+    UNET_IMAGE_SIZE,
+    UNET_INPUT_CHANNELS,
+    UNET_LEARNING_RATE,
+    UNET_MAX_GRADIENT_NORM,
+    UNET_MIN_LEARNING_RATE,
+    UNET_NUM_CLASSES,
+    UNET_NUM_WORKERS,
+    UNET_TRAIN_DATA,
+    UNET_TRAIN_OUTPUT,
+    UNET_WEIGHT_DECAY,
+)
 from .unet import build
 from .dataset import build_dataloaders
 from .losses import BCEDiceLoss, compute_iou, compute_dice
@@ -27,13 +43,13 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="Train U-Net for ripple segmentation"
     )
-    p.add_argument("--data",        type=str,   default="dataset/ripple_split", help="Root data folder")
-    p.add_argument("--epochs",      type=int,   default=100)
-    p.add_argument("--batch_size",  type=int,   default=8)
-    p.add_argument("--img_size",    type=int,   default=256)
-    p.add_argument("--lr",          type=float, default=0.001)
-    p.add_argument("--base_channel",type=int,   default=64,        help="U-Net width")
-    p.add_argument("--save_dir",    type=str,   default="models")
+    p.add_argument("--data",        type=str,   default=str(UNET_TRAIN_DATA), help="Root data folder")
+    p.add_argument("--epochs",      type=int,   default=UNET_EPOCHS)
+    p.add_argument("--batch_size",  type=int,   default=UNET_BATCH_SIZE)
+    p.add_argument("--img_size",    type=int,   default=UNET_IMAGE_SIZE)
+    p.add_argument("--lr",          type=float, default=UNET_LEARNING_RATE)
+    p.add_argument("--base_channel",type=int,   default=UNET_BASE_CHANNELS, help="U-Net width")
+    p.add_argument("--save_dir",    type=str,   default=str(UNET_TRAIN_OUTPUT))
     p.add_argument("--resume",      type=str,   default=None,      help="Path to checkpoint")
     p.add_argument(
         "--pretrained",
@@ -41,7 +57,7 @@ def parse_args():
         default=None,
         help="Load model weights only and start fine-tuning from epoch 0",
     )
-    p.add_argument("--num_workers", type=int,   default=4)
+    p.add_argument("--num_workers", type=int,   default=UNET_NUM_WORKERS)
     args = p.parse_args()
 
     if args.resume and args.pretrained:
@@ -88,7 +104,10 @@ def train_one_epoch(
         loss.backward()
 
         """Normalize gradient value"""
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(
+            model.parameters(),
+            max_norm=UNET_MAX_GRADIENT_NORM,
+        )
 
         """Update parameters"""
         optimizer.step()
@@ -132,32 +151,57 @@ def validate(model, loader, criterion, device):
     return total_loss / n, total_iou / n, total_dice / n
 
 def save_checkpoint(state: dict, path: str):
+    """
+        Save training checkpoint to disk.
+
+    """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(state, path)
+
     print(f"  ✓ Checkpoint saved → {path}")
 
 
 def load_pretrained_weights(model, checkpoint_path: str, device) -> None:
+    """
+        Load pretrained model weights for fine-tuning.
+
+        This function only loads model weights.
+        Optimizer and scheduler are not restored because fine-tuning should
+        start with a new training state.
+    """
+
     path = Path(checkpoint_path)
     if not path.is_file():
         raise FileNotFoundError(f"Pretrained checkpoint not found: {path}")
 
     checkpoint = torch.load(path, map_location=device)
+
+    """Support both full checkpoint and raw state_dict format"""
     state_dict = checkpoint.get("model", checkpoint) if isinstance(checkpoint, dict) else checkpoint
     model.load_state_dict(state_dict)
-
     source_epoch = checkpoint.get("epoch") if isinstance(checkpoint, dict) else None
+
+    """Print loading information"""
     if source_epoch is None:
         print(f"Loaded pretrained weights: {path}")
     else:
         print(f"Loaded pretrained weights from epoch {source_epoch + 1}: {path}")
+
     print("Optimizer and scheduler will start from a new state.")
 
 
 def format_duration(seconds: float) -> str:
+    """
+        Convert duration from seconds to HH:MM:SS format.
+    """
+
+    """Round to nearest integer second"""
     total_seconds = int(round(seconds))
+
+    """Split seconds into hours, minutes, and seconds"""
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
+
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 """
@@ -182,8 +226,8 @@ def main():
 
     """Model"""
     model = build(
-        in_channels     = 3, 
-        num_classes     = 1, 
+        in_channels     = UNET_INPUT_CHANNELS,
+        num_classes     = UNET_NUM_CLASSES,
         base_channels   = args.base_channel
     ).to(device)
 
@@ -191,15 +235,23 @@ def main():
         load_pretrained_weights(model, args.pretrained, device)
 
     """Loss"""
-    criterion = BCEDiceLoss(alpha=0.5)
+    criterion = BCEDiceLoss(alpha=UNET_DICE_ALPHA)
 
     """Optimizer: Using AdamW"""
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=args.lr,
+        weight_decay=UNET_WEIGHT_DECAY,
+    )
 
     """
         Scheduler: change learning rate during training
     """
-    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
+    scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=args.epochs,
+        eta_min=UNET_MIN_LEARNING_RATE,
+    )
 
     """Resume training from checkpoint"""
     start_epoch   = 0

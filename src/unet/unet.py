@@ -12,9 +12,21 @@
     boundaries) that would be lost during downsampling.
 """
 
+import sys
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+from configs.unet import (
+    UNET_BASE_CHANNELS,
+    UNET_IMAGE_SIZE,
+    UNET_INPUT_CHANNELS,
+    UNET_NUM_CLASSES,
+)
 
 class ConvBlock(nn.Module):
     """
@@ -94,7 +106,12 @@ class UNet(nn.Module):
             base_channels: controls model width. Default 64.
                         Reduce to 32 for lighter model on Colab T4.
     """
-    def __init__(self, in_channels: int=3, num_classes: int=1, base_channels: int=64):
+    def __init__(
+        self,
+        in_channels: int = UNET_INPUT_CHANNELS,
+        num_classes: int = UNET_NUM_CLASSES,
+        base_channels: int = UNET_BASE_CHANNELS,
+    ):
         super().__init__()
         c = base_channels
 
@@ -143,7 +160,11 @@ class UNet(nn.Module):
         return x
     
 
-def build(in_channels=3, num_classes=1, base_channels=64):
+def build(
+    in_channels=UNET_INPUT_CHANNELS,
+    num_classes=UNET_NUM_CLASSES,
+    base_channels=UNET_BASE_CHANNELS,
+):
     model = UNet(
         in_channels=in_channels,
         num_classes=num_classes,
@@ -158,8 +179,8 @@ if __name__ == "__main__":
     model = build()
 
     """Test model with random tensor"""
-    x = torch.randn(2, 3, 256, 256)
+    x = torch.randn(2, UNET_INPUT_CHANNELS, UNET_IMAGE_SIZE, UNET_IMAGE_SIZE)
     out = model(x)
 
-    print(f"Input:  {x.shape}")   # (2, 3, 256, 256)
-    print(f"Output: {out.shape}") # (2, 1, 256, 256)
+    print(f"Input:  {x.shape}")
+    print(f"Output: {out.shape}")
