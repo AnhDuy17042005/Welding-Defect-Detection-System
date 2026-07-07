@@ -1,0 +1,11 @@
+services:
+  welding-defect-api:
+    build: .
+    image: welding-defect-api:latest
+    ports:
+      - "8000:8000"
+    environment:
+      MAX_UPLOAD_MB: 12
+    volumes:
+      - ./models:/app/models:ro
+    restart: unless-stopped
