@@ -7,8 +7,12 @@ __pycache__
 .ruff_cache
 .vscode
 
-dataset/archive
-dataset/processed
-dataset/raw
+dataset/augmented
+dataset/finaldata
+dataset/require
+dataset/ripple
+dataset/ripple_roi
+dataset/ripple_split
+dataset/test
+
 output
-notebooks
