@@ -1,0 +1,60 @@
+{
+  "model_type": "U-Net binary segmentation",
+  "model": "/media/duy/6218F0F318F0C6D71/StudyDocuments_at_BKU/Projects/Welding-Defect-Detection-System/models/unet/train_ver3/best.pth",
+  "data": "/media/duy/6218F0F318F0C6D71/StudyDocuments_at_BKU/Projects/Welding-Defect-Detection-System/dataset/ripple_roi",
+  "split": "test",
+  "image_count": 6,
+  "settings": {
+    "img_size": 512,
+    "threshold": 0.25,
+    "device": "cpu",
+    "post_processing": true,
+    "max_images": null
+  },
+  "global": {
+    "raw": {
+      "tp": 814130,
+      "fp": 56103,
+      "fn": 67611,
+      "tn": 503779,
+      "precision": 0.9355310589232998,
+      "recall": 0.9233210205718005,
+      "specificity": 0.8997949567944674,
+      "iou": 0.8680868033489578,
+      "dice": 0.9293859383757979,
+      "pixel_accuracy": 0.9141842215336464
+    },
+    "post_processed": {
+      "tp": 816532,
+      "fp": 56926,
+      "fn": 65209,
+      "tn": 502956,
+      "precision": 0.9348268605931825,
+      "recall": 0.9260451765314305,
+      "specificity": 0.898325004197313,
+      "iou": 0.8698846342739225,
+      "dice": 0.9304152976386153,
+      "pixel_accuracy": 0.9152795148246109
+    }
+  },
+  "mean_per_image": {
+    "raw": {
+      "precision": 0.8831939085861729,
+      "recall": 0.8855738924942961,
+      "specificity": 0.8704027110441713,
+      "iou": 0.787076061148437,
+      "dice": 0.8763126083073648,
+      "pixel_accuracy": 0.9046974713965706
+    },
+    "post_processed": {
+      "precision": 0.8794852871974558,
+      "recall": 0.8904743660501433,
+      "specificity": 0.8658791028467577,
+      "iou": 0.7871057030091344,
+      "dice": 0.87570253369562,
+      "pixel_accuracy": 0.903659461298636
+    }
+  },
+  "elapsed_seconds": 11.271,
+  "milliseconds_per_image": 1878.464
+}
