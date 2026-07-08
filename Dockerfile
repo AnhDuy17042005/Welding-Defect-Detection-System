@@ -6,8 +6,10 @@ RUN apt-get update
 RUN apt-get install -y libgl1 libglib2.0-0
 
 COPY requirements.txt .
+
 RUN python -m pip install --upgrade pip
-RUN python -m pip install -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install -r requirements.txt
 
 COPY src ./src
 COPY backend ./backend
