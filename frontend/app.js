@@ -16,6 +16,7 @@ const unetThresholdValue = document.querySelector("#unetThresholdValue");
 const roiMarginValue  = document.querySelector("#roiMarginValue");
 const yoloModelInput  = document.querySelector("#yoloModelInput");
 const unetModelInput  = document.querySelector("#unetModelInput");
+const yoloImgszInput  = document.querySelector("#yoloImgszInput");
 const unetImgszInput  = document.querySelector("#unetImgszInput");
 const showMasksInput  = document.querySelector("#showMasksInput");
 const showBoxesInput  = document.querySelector("#showBoxesInput");
@@ -61,6 +62,18 @@ async function loadHealth() {
     const models = data.models || {};
     populateModelSelect(yoloModelInput, models.yolo || [], models.selected_yolo);
     populateModelSelect(unetModelInput, models.unet || [], models.selected_unet);
+    if (Number.isFinite(Number(data.yolo_confidence))) {
+      confInput.value = data.yolo_confidence;
+      confInput.defaultValue = data.yolo_confidence;
+    }
+    if (Number.isFinite(Number(data.yolo_iou))) {
+      iouInput.value = data.yolo_iou;
+      iouInput.defaultValue = data.yolo_iou;
+    }
+    if (Number.isFinite(Number(data.yolo_imgsz))) {
+      yoloImgszInput.value = data.yolo_imgsz;
+      yoloImgszInput.defaultValue = data.yolo_imgsz;
+    }
     if (Number.isFinite(Number(data.unet_threshold))) {
       unetThresholdInput.value = data.unet_threshold;
       unetThresholdInput.defaultValue = data.unet_threshold;
@@ -73,6 +86,15 @@ async function loadHealth() {
       unetImgszInput.value = data.unet_imgsz;
       unetImgszInput.defaultValue = data.unet_imgsz;
     }
+    const display = data.display || {};
+    showMasksInput.checked = Boolean(display.masks);
+    showMasksInput.defaultChecked = Boolean(display.masks);
+    showBoxesInput.checked = Boolean(display.boxes);
+    showBoxesInput.defaultChecked = Boolean(display.boxes);
+    showLabelsInput.checked = Boolean(display.labels);
+    showLabelsInput.defaultChecked = Boolean(display.labels);
+    showConfInput.checked = Boolean(display.confidence);
+    showConfInput.defaultChecked = Boolean(display.confidence);
     updateRangeLabels();
     setHealth("ok", data.model_name || "YOLOv11 + U-Net");
   } catch (error) {
