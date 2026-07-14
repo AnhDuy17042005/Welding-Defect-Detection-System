@@ -7,12 +7,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-UNET_RUNS_DIR       = ROOT / "models" / "unet"
-UNET_OUTPUT_DIR     = ROOT / "output" / "unet"
+UNET_RUNS_DIR         = ROOT / "models" / "unet"
+UNET_OUTPUT_DIR       = ROOT / "output" / "unet"
 RIPPLE_SOURCE_DATASET = ROOT / "dataset" / "ripple"
 RIPPLE_SPLIT_DATASET  = ROOT / "dataset" / "ripple_split"
-RIPPLE_ROI_DATASET  = ROOT / "dataset" / "ripple_roi"
-UNET_DEFAULT_IMAGE  = ROOT / "dataset" / "test" / "2-12.jpg"
+RIPPLE_ROI_DATASET    = ROOT / "dataset" / "ripple_roi"
+UNET_DEFAULT_IMAGE    = ROOT / "dataset" / "test" / "5 (3).jpg"
 
 UNET_MODEL_ID       = "unet_ver3"
 UNET_MODEL_VERSION  = 3

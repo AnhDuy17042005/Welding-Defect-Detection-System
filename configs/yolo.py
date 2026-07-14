@@ -5,10 +5,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-YOLO_RUNS_DIR   = ROOT / "models" / "runs"
-YOLO_OUTPUT_DIR = ROOT / "output" / "yolo"
-YOLO_DATA_YAML  = ROOT / "dataset" / "augmented" / "data.yaml"
-YOLO_DEFAULT_IMAGE = ROOT / "dataset" / "require" / "2-12.jpg"
+YOLO_RUNS_DIR       = ROOT / "models" / "runs"
+YOLO_OUTPUT_DIR     = ROOT / "output" / "yolo"
+YOLO_DATA_YAML      = ROOT / "dataset" / "augmented" / "data.yaml"
+YOLO_DEFAULT_IMAGE  = ROOT / "dataset" / "require" / "5 (3).jpg"
 
 YOLO_MODEL_ID       = "yolo_ver5"
 YOLO_MODEL_VERSION  = 5
