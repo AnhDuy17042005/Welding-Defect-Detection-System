@@ -1,0 +1,18 @@
+
+# Deep learning and computer vision
+
+torch==2.12.0
+torchvision==0.27.0
+numpy==2.4.6
+opencv-python==4.13.0.92
+albumentations==2.0.8
+ultralytics==8.4.68
+onnxruntime==1.27.0
+openvino==2026.2.1
+tqdm==4.68.3
+
+# Web API and model serving
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
