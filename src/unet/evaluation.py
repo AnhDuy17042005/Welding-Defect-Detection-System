@@ -20,6 +20,9 @@ import torch
 """Project Root"""
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+"""Support direct script run from the project root."""
+if __package__ in (None, ""):
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 """Config Imports"""
 from configs.data import IMAGE_EXTENSIONS
@@ -438,7 +441,7 @@ def main() -> None:
         "split": args.split,
         "image_count": len(per_image),
 
-        """Evaluation Settings"""
+        # Evaluation Settings
         "settings": {
             "img_size": img_size,
             "threshold": args.threshold,
@@ -447,19 +450,19 @@ def main() -> None:
             "max_images": args.max_images,
         },
 
-        """Global Metrics"""
+        # Global Metrics
         "global": {
             "raw": metrics_from_counts(raw_total),
             "post_processed": metrics_from_counts(processed_total),
         },
 
-        """Mean Per-image Metrics"""
+        # Mean Per-image Metrics
         "mean_per_image": {
             "raw": mean_metrics(per_image, "raw"),
             "post_processed": mean_metrics(per_image, "post_processed"),
         },
 
-        """Speed Metrics"""
+        # Speed Metrics
         "elapsed_seconds": round(elapsed_seconds, 3),
         "milliseconds_per_image": round(
             elapsed_seconds * 1000 / len(per_image),

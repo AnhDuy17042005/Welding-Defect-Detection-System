@@ -6,6 +6,10 @@ from ultralytics import YOLO
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+"""Support direct script run from the project root."""
+if __package__ in (None, ""):
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from configs.yolo import (
     YOLO_BASE_MODEL,
     YOLO_BATCH_SIZE,

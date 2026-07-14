@@ -21,6 +21,10 @@ import torch.nn.functional as F
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+"""Support direct script run from the project root."""
+if __package__ in (None, ""):
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from configs.unet import (
     UNET_BASE_CHANNELS,
     UNET_IMAGE_SIZE,

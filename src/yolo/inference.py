@@ -13,6 +13,10 @@ from ultralytics import YOLO
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+"""Support direct script run from the project root."""
+if __package__ in (None, ""):
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from configs.yolo import (
     YOLO_CONFIDENCE_THRESHOLD,
     YOLO_DEFAULT_IMAGE,
@@ -20,6 +24,7 @@ from configs.yolo import (
     YOLO_INFERENCE_OUTPUT,
     YOLO_IOU_THRESHOLD,
     YOLO_MODEL,
+    YOLO_TASK,
 )
 
 def parse_args() -> argparse.Namespace:
@@ -71,7 +76,7 @@ def predict(
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")
 
-    model = YOLO(str(model_path))
+    model = YOLO(str(model_path), task=YOLO_TASK)
 
     results = model.predict(
         source=image,
@@ -109,6 +114,7 @@ def save_outputs(
     stem = image_path.stem
 
     prediction_image = result.plot(
+        masks=False,
         boxes=True,
         labels=True,
         conf=True,

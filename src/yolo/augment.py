@@ -7,6 +7,10 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+"""Support direct script run from the project root."""
+if __package__ in (None, ""):
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from configs.yolo import (
     YOLO_AUGMENT_INPUT_IMAGES as INPUT_IMAGES,
     YOLO_AUGMENT_INPUT_LABELS as INPUT_LABELS,

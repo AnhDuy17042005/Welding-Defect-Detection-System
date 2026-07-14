@@ -35,13 +35,59 @@ from configs.unet import (
     IMAGENET_STD as IMAGENET_STD_VALUES,
     UNET_DEFAULT_IMAGE,
     UNET_DEVICE,
+    UNET_IMAGE_SIZE,
     UNET_MODEL,
     UNET_OUTPUT_DIR,
     UNET_THRESHOLD,
 )
 
 IMAGENET_MEAN = np.asarray(IMAGENET_MEAN_VALUES, dtype=np.float32)
-IMAGENET_STD = np.asarray(IMAGENET_STD_VALUES, dtype=np.float32)
+IMAGENET_STD  = np.asarray(IMAGENET_STD_VALUES, dtype=np.float32)
+
+
+class OnnxUnetModel:
+    """
+        Small adapter so ONNX Runtime models can be called like PyTorch models.
+    """
+
+    def __init__(self, model_path: Path) -> None:
+        import onnxruntime as ort
+
+        providers = ["CPUExecutionProvider"]
+        self.session = ort.InferenceSession(str(model_path), providers=providers)
+        self.input_name = self.session.get_inputs()[0].name
+        self.output_name = self.session.get_outputs()[0].name
+        self.input_shape = self.session.get_inputs()[0].shape
+
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        input_array = tensor.detach().cpu().numpy().astype(np.float32)
+        logits = self.session.run(
+            [self.output_name],
+            {self.input_name: input_array},
+        )[0]
+
+        return torch.from_numpy(logits).to(tensor.device)
+
+
+class OpenVINOUnetModel:
+    """
+        Small adapter so OpenVINO IR models can be called like PyTorch models.
+    """
+
+    def __init__(self, model_path: Path) -> None:
+        import openvino as ov
+
+        core = ov.Core()
+        self.compiled_model = core.compile_model(model_path, "CPU")
+        self.input = self.compiled_model.input(0)
+        self.output = self.compiled_model.output(0)
+        self.input_shape = list(self.input.partial_shape)
+
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        input_array = tensor.detach().cpu().numpy().astype(np.float32)
+        logits = self.compiled_model({self.input: input_array})[self.output]
+
+        return torch.from_numpy(logits).to(tensor.device)
 
 
 def parse_args() -> argparse.Namespace:
@@ -124,6 +170,30 @@ def load_model(
     """Check checkpoint path"""
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")
+
+    """Load OpenVINO IR model with OpenVINO Runtime"""
+    if model_path.suffix.lower() == ".xml":
+        model = OpenVINOUnetModel(model_path)
+        shape_size = model.input_shape[-1]
+        input_size = img_size or (
+            int(shape_size.get_length())
+            if shape_size.is_static
+            else UNET_IMAGE_SIZE
+        )
+
+        return model, input_size
+
+    """Load ONNX model with ONNX Runtime"""
+    if model_path.suffix.lower() == ".onnx":
+        model = OnnxUnetModel(model_path)
+        shape_size = model.input_shape[-1]
+        input_size = img_size or (
+            int(shape_size)
+            if isinstance(shape_size, int)
+            else UNET_IMAGE_SIZE
+        )
+
+        return model, input_size
 
     """Load checkpoint to selected device"""
     checkpoint = torch.load(model_path, map_location=device)

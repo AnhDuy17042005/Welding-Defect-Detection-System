@@ -17,6 +17,10 @@ import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+"""Support direct script run from the project root."""
+if __package__ in (None, ""):
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from configs.data import IMAGE_EXTENSIONS, RIPPLE_ROI_DATASET, RIPPLE_SPLIT_DATASET, SPLITS
 from configs.unet import UNET_ROI_DATA_MARGIN
 
