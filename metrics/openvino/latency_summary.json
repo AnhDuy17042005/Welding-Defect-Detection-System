@@ -1,0 +1,44 @@
+{
+  "yolo": {
+    "metric": "average_latency_ms_per_image",
+    "image_dir": "/media/duy/6218F0F318F0C6D71/StudyDocuments_at_BKU/Projects/Welding-Defect-Detection-System/dataset/require",
+    "pytorch": {
+      "target": "yolo",
+      "backend": "pytorch",
+      "image_count": 29,
+      "repeat": 3,
+      "sample_count": 87,
+      "average_latency_ms_per_image": 868.673
+    },
+    "openvino": {
+      "target": "yolo",
+      "backend": "openvino",
+      "image_count": 29,
+      "repeat": 3,
+      "sample_count": 87,
+      "average_latency_ms_per_image": 644.0064
+    },
+    "speedup_ratio": 1.3489
+  },
+  "unet": {
+    "metric": "average_latency_ms_per_image",
+    "image_dir": "/media/duy/6218F0F318F0C6D71/StudyDocuments_at_BKU/Projects/Welding-Defect-Detection-System/dataset/ripple_roi/test/images",
+    "pytorch": {
+      "target": "unet",
+      "backend": "pytorch",
+      "image_count": 6,
+      "repeat": 3,
+      "sample_count": 18,
+      "average_latency_ms_per_image": 2266.4118
+    },
+    "openvino": {
+      "target": "unet",
+      "backend": "openvino",
+      "image_count": 6,
+      "repeat": 3,
+      "sample_count": 18,
+      "average_latency_ms_per_image": 1581.4696
+    },
+    "speedup_ratio": 1.4331
+  }
+}
