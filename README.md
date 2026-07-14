@@ -14,6 +14,20 @@ A welding inspection system built with YOLO11-seg, U-Net, FastAPI, and OpenCV. Y
 4. The ripple mask is post-processed and restricted to the YOLO welding-line mask.
 5. YOLO detections and the U-Net mask are combined into the final output.
 
+## Welding Defect Classes
+
+<p align="center">
+  <img src="assets/9_defects.jpg" alt="YOLO Prediction Examples for 9 Welding Defect Classes" width="900">
+</p>
+
+## User Interface
+
+<p align="center">
+  <img src="assets/ui.png" alt="User Interface for Web" width="900">
+</p>
+
+The web application was developed so that users can inspect weld images directly through a web browser. The interface has two main parts: the control panel and the result display area
+
 ## U-Net Architecture
 
 <p align="center">

@@ -1,17 +1,15 @@
-# Ignore dataset contents
-dataset/archive/
-dataset/processed/
-dataset/raw/
-dataset/require/
-
-# Keep empty folder structure
-!dataset/processed/.gitkeep
-!dataset/raw/.gitkeep
-!dataset/require/.gitkeep
-!dataset/archive/.gitkeep
-
 .venv/
 .vscode/
 
-__pycache__/
-*.py[cod]
+models/
+output/
+
+dataset/augmented/
+dataset/require/
+dataset/finaldata/
+dataset/ripple/
+dataset/test/
+
+*.pt
+*.pth
+*.onnx
