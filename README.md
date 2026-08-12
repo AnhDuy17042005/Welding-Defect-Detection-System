@@ -97,6 +97,12 @@ python -m pip install -r requirements.txt
 
 ## Model Checkpoints
 
+Download the `models/` folder from Google Drive:
+
+- [Google Drive - Welding Defect models](https://drive.google.com/drive/folders/1GF85uVbV8jkwjfzdymWgQn092-NTCcLT?usp=sharing)
+
+Place the downloaded `models/` folder at the project root so the checkpoint paths match the default configuration.
+
 The default model registry uses:
 
 ```text
